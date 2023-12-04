@@ -1,0 +1,7 @@
+# Ignore all files in the input folder
+/input/*
+
+# Ignore all files in the output folder
+/output/*
+
+.env

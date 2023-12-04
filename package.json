@@ -1,0 +1,36 @@
+{
+  "name": "ocr_ai",
+  "version": "1.0.0",
+  "description": "Testing ocr process with tesseract and local llm",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/timlohse1104/ocr_ai.git"
+  },
+  "keywords": [
+    "ocr",
+    "ai",
+    "llm",
+    "tesseract"
+  ],
+  "author": "Tim Köster",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/timlohse1104/ocr_ai/issues"
+  },
+  "homepage": "https://github.com/timlohse1104/ocr_ai#readme",
+  "dependencies": {
+    "axios": "^1.6.2",
+    "dotenv": "^16.3.1",
+    "path": "^0.12.7",
+    "pdf-lib": "^1.17.1",
+    "pdf2pic": "^3.1.0",
+    "sharp": "^0.33.0",
+    "tesseract.js": "^5.0.3",
+    "url": "^0.11.3"
+  }
+}
