@@ -29,9 +29,13 @@ class RunAnalyticsInformation {
       pageCount: null,
       convertedImagesInformation: [],
     };
-    this.recognizeStartTime = null;
-    this.recognizeEndTime = null;
-    this.recognizeTime = null;
+    this.recognitionStartTime = null;
+    this.recognitionEndTime = null;
+    this.recognitionTime = null;
+    this.recognitionTxtFile = null;
+    this.recognitionHtmlFile = null;
+    this.recognitionImagePaths = [];
+    this.recognitionFulltext = null;
     this.analyzeStartTime = null;
     this.analyzeEndTime = null;
     this.analyzeTime = null;
@@ -169,7 +173,7 @@ async function convert(filename, runAnalyticsInformation) {
   return pageCount;
 }
 
-async function recognize(filename, pages) {
+async function recognize(filename, pages, runAnalyticsInformation) {
   const recognizeStartTime = new Date();
 
   // Recognize image with Tesseract
@@ -184,26 +188,39 @@ async function recognize(filename, pages) {
     __dirname,
     `./output/${filename}.ocr-recognition.html`
   );
-  console.log("FOO");
-  for (let i = 1; i < pages; i++) {
+
+  // Clear output files
+  fs.writeFileSync(outputTxtFile, "");
+  fs.writeFileSync(outputHtmlFile, "");
+
+  // Recognize pages
+  for (let i = 1; i <= pages; i++) {
     const imagePath = path.join(
       __dirname,
       `./output/${filename}.${i}.${format}`
     );
+    runAnalyticsInformation.recognitionImagePaths.push(imagePath);
     const ret = await worker.recognize(imagePath);
-    fs.appendFileSync(outputTxtFile, ret.data.text.replace(/\n/g, " "));
+    const recognizedFulltext = ret.data.text.replace(/\n/g, " ");
+    fs.appendFileSync(outputTxtFile, recognizedFulltext);
     fs.appendFileSync(outputHtmlFile, ret.data.hocr, { flag: "a+" });
   }
-
-  const resultText = await fs.readFileSync(outputTxtFile).toString("utf8");
+  const resultText = fs.readFileSync(outputTxtFile).toString("utf8");
   console.log(`Recognition found ${resultText.split(" ").length} words.`);
   console.debug("[DEBUG] :", resultText);
   await worker.terminate();
   const recognizeEndTime = new Date();
-  const recognizeTimeDifference = recognizeEndTime - recognizeStartTime;
-  console.log(`Recognition took: ${recognizeTimeDifference / 1000}s.`);
+  const recognizeTimeDifferenceSeconds =
+    (recognizeEndTime - recognizeStartTime) / 1000;
+  console.log(`Recognition took: ${recognizeTimeDifferenceSeconds}s.`);
 
   // Add analytics information
+  runAnalyticsInformation.recognitionStartTime = recognizeStartTime;
+  runAnalyticsInformation.recognitionEndTime = recognizeEndTime;
+  runAnalyticsInformation.recognitionTime = recognizeTimeDifferenceSeconds;
+  runAnalyticsInformation.recognitionTxtFile = outputTxtFile;
+  runAnalyticsInformation.recognitionHtmlFile = outputHtmlFile;
+  runAnalyticsInformation.recognitionFulltext = resultText;
 }
 
 async function analyze() {
@@ -230,16 +247,22 @@ async function analyze() {
 }
 
 async function persistRunAnalytics(runAnalyticsInformations) {
-  console.log("Persisting run analytics informations...", {
-    runAnalyticsInformations,
-  });
+  console.log(
+    "Persisting run analytics informations...",
+    JSON.stringify(runAnalyticsInformations)
+  );
 
   const filePath = path.join(
     __dirname,
-    `./output/${process.env.RUN_INFORMATIONS_FILENAME}`
+    `./analytics/${process.env.RUN_ANALYTICS_FILENAME}`
   );
 
   const pastRunInformation = JSON.parse(fs.readFileSync(filePath).toString());
 
-  console.log("pastRunInformation", pastRunInformation);
+  pastRunInformation.runs.push(...runAnalyticsInformations);
+
+  fs.writeFileSync(filePath, JSON.stringify(pastRunInformation));
+  console.log(
+    `Persisted ${runAnalyticsInformations.length} run analytics informations`
+  );
 }

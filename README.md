@@ -54,3 +54,7 @@ For any needed information run:
 ```
 npm start -- --help
 ```
+
+### Lookup analytics information
+
+After each document beeing converted into images (amount dependend on pdf pages), recognized with tesseract and analyzed with llm all necessary analytics information will be persisted into `./analytics/run_analytics.json` file.
