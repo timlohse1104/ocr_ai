@@ -12,9 +12,9 @@ const __dirname = path.dirname(__filename);
 
 class RunAnalyticsInformation {
   constructor() {
-    this.convertStartTime = null;
-    this.convertEndTime = null;
-    this.convertTime = null;
+    this.convertionStartTime = null;
+    this.convertionEndTime = null;
+    this.convertionTime = null;
     this.tesseract = {
       format: null,
       density: null,
@@ -36,9 +36,10 @@ class RunAnalyticsInformation {
     this.recognitionHtmlFile = null;
     this.recognitionImagePaths = [];
     this.recognitionFulltext = null;
-    this.analyzeStartTime = null;
-    this.analyzeEndTime = null;
-    this.analyzeTime = null;
+    this.analysisStartTime = null;
+    this.analysisEndTime = null;
+    this.analysisTime = null;
+    this.analysisResult = null;
   }
 }
 
@@ -57,7 +58,7 @@ class RunAnalyticsInformation {
 
   // Get the value of the "--filename" input parameter
   const filenameIndex = process.argv.findIndex((arg) => arg === "--filename");
-  const filename = process.argv[filenameIndex + 1];
+  const filename = filenameIndex === -1 ? "" : process.argv[filenameIndex + 1];
 
   // Check if the "--all" input parameter is present
   const allIndex = process.argv.findIndex((arg) => arg === "--all");
@@ -75,22 +76,23 @@ class RunAnalyticsInformation {
 
   if (all) {
     const files = fs.readdirSync("./input");
+    console.log(files);
     console.log(`OCR all ${files.length} pdf files...`);
     for (const file of files) {
       if (file.endsWith(".pdf")) {
+        const filename = file.replace(".pdf", "");
         const runAnalyticsInformation = new RunAnalyticsInformation();
         runAnalyticsInformations.push(runAnalyticsInformation);
-        const pages = await convert(
-          file.replace(".pdf", ""),
-          runAnalyticsInformation
-        );
-        await recognize(
-          file.replace(".pdf", ""),
+        const pages = await convert(filename, runAnalyticsInformation);
+        const ocrFulltext = await recognize(
+          filename,
           pages,
           runAnalyticsInformation
         );
+        await analyze(filename, ocrFulltext);
       }
     }
+    console.log(`Successfully analyzed all ${files.length} pdf files.`);
   }
 
   // OCR one pdf file with tesseract
@@ -99,7 +101,13 @@ class RunAnalyticsInformation {
     const runAnalyticsInformation = new RunAnalyticsInformation();
     runAnalyticsInformations.push(runAnalyticsInformation);
     const pages = await convert(filename, runAnalyticsInformation);
-    await recognize(filename, pages, runAnalyticsInformation);
+    const ocrFulltext = await recognize(
+      filename,
+      pages,
+      runAnalyticsInformation
+    );
+    await analyze(filename, ocrFulltext, runAnalyticsInformation);
+    console.log(`Successfully analyzed ${filename}.pdf.`);
   }
 
   // Persist run analytics
@@ -157,9 +165,9 @@ async function convert(filename, runAnalyticsInformation) {
   );
 
   // Add analytics information
-  runAnalyticsInformation.convertStartTime = convertStartTime;
-  runAnalyticsInformation.convertEndTime = convertEndTime;
-  runAnalyticsInformation.convertTime = convertTimeDifferenceSecond;
+  runAnalyticsInformation.convertionStartTime = convertStartTime;
+  runAnalyticsInformation.convertionEndTime = convertEndTime;
+  runAnalyticsInformation.convertionTime = convertTimeDifferenceSecond;
   runAnalyticsInformation.tesseract.format = format;
   runAnalyticsInformation.tesseract.density = density;
   runAnalyticsInformation.tesseract.quality = quality;
@@ -221,35 +229,70 @@ async function recognize(filename, pages, runAnalyticsInformation) {
   runAnalyticsInformation.recognitionTxtFile = outputTxtFile;
   runAnalyticsInformation.recognitionHtmlFile = outputHtmlFile;
   runAnalyticsInformation.recognitionFulltext = resultText;
+
+  return resultText;
 }
 
-async function analyze() {
-  const baseUrl = process.env.BASE_URL;
+async function analyze(filename, ocrFulltext, runAnalyticsInformation) {
+  const baseUrl = process.env.COMPLETION_BASE_URL;
 
   console.log(
     `Analyzing text for ${filename}.pdf to find assignable properties...`
   );
   const analyzeStartTime = new Date();
 
+  let analyzeResponse;
   let analyzeResult;
   try {
-    analyzeResult = await axios.post(`${baseUrl}/completion`);
-    console.log(result.headers, result.status, result.statusText);
-    return JSON.parse(result.data.content);
+    const completionBody = {
+      stream: false,
+      n_predict: 400,
+      temperature: 0.1,
+      stop: ["</s>"],
+      repeat_last_n: 256,
+      repeat_penalty: 1.18,
+      top_k: 40,
+      top_p: 0.5,
+      tfs_z: 1,
+      typical_p: 1,
+      presence_penalty: 0,
+      frequency_penalty: 0,
+      min_p: 0.05,
+      mirostat: 0,
+      mirostat_tau: 5,
+      mirostat_eta: 0.1,
+      grammar:
+        '# Grammar for subset of JSON - doesn\'t support full string or number syntax\n\nroot  ::= object\nvalue ::= object | array | string | number | boolean | "null"\n\nobject ::=\n  "{" ws (\n            string ":" ws value\n    ("," ws string ":" ws value)*\n  )? "}"\n\narray  ::=\n  "[" ws (\n            value\n    ("," ws value)*\n  )? "]"\n\nstring  ::=\n  "\\"" (\n    [^"\\\\] |\n    "\\\\" (["\\\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F]) # escapes\n  )* "\\"" ws\n\n# Only plain integers and floating point numbers currently\nnumber ::= "-"? [0-9]+ ("." [0-9]+)? ws\n\nboolean ::= ("true" | "false") ws\n\n# Optional space: by convention, applied in this grammar after literal chars when allowed\nws ::= ([ \\t\\n] ws)?',
+      n_probs: 0,
+      prompt: `Der nachfolgende String besteht aus Wörtern, die per OCR aus einem Dokument ausgelesen wurden. Du sollst mir daraus Werte extrahieren ('Beschreibung des Wertes' - 'Schlüssel des Wertes für die Ausgabe'): 'Anbieter Name' - 'ocr:vendorName', 'Fälligkeits-Datum' - 'ocr:dueDate', 'Rechnungsdatum' - 'ocr:invoiceReceiptDate', 'Rechnungsnummer' - 'ocr:invoiceReceiptId', 'Zahlungsbedingungen' - 'ocr:paymentTerms', 'Empfänger Adresse' - 'ocr:receiverAddress', 'Nettobetrag' - 'ocr:subtotal', 'Mehrwehrtsteuer' - 'ocr:tax', 'Gesamtsumme' - 'ocr:total', 'Steuernummer' - 'ocr:taxPayerId', 'Öko Kontrollnummer' - 'ocr:oekoId', 'Anbieter Adresse' - 'ocr:vendorAddress', 'Umsatzsteuer Identifikationsnummer' - 'ocr:taxPayerUstId', 'Steuersatz' - 'ocr:taxRate', 'Lieferdatum' - 'ocr:deliveryDate', 'Telefonnummer des Anbieters' - 'ocr:vendorPhone', 'Faxnummer des Anbieters' - 'ocr:vendorFax', 'Email des Anbieters' - 'ocr:vendorEmail', 'Belegtyp' - 'ocr:invoiceReceiptType', 'Dokumentjahr' - 'ocr:invoiceReceiptYear', 'Skontosatz' - 'ocr:discountRate', 'Zahlungsziel Skonto' - 'ocr:discountDueDate', 'Zahlbetrag Skonto' - 'ocr:discountTotal', 'ID des Unternehmens des Empfängers' - 'ocr:receiverCompany', 'ocr:ibanList' - 'Liste aller erkannten IBANs', 'ocr:bicList' - 'Liste aller erkannten BICs' \n ${ocrFulltext}`,
+    };
+    console.log(
+      `Requesting llm analysis from ${baseUrl}/completion with body`,
+      completionBody
+    );
+    analyzeResponse = await axios.post(`${baseUrl}/completion`, completionBody);
+    console.log("analyzeResponse", analyzeResponse);
+    analyzeResult = JSON.parse(result.data.content);
   } catch (error) {
     console.error("Error:", error.message);
   }
 
   const analyzeEndTime = new Date();
   const analyzeTimeDifference = analyzeEndTime - analyzeStartTime;
-  console.log("Found:", analyzeResult.data.content);
-  console.log(`Analyzing took: ${analyzeTimeDifference / 1000}s.`);
+  console.log(`[DEBUG] Analysis found:`, analyzeResult);
+  console.log(`Analysis took: ${analyzeTimeDifference / 1000}s.`);
+
+  // Add analytics information
+  runAnalyticsInformation.analysisStartTime = analyzeStartTime;
+  runAnalyticsInformation.analysisEndTime = analyzeEndTime;
+  runAnalyticsInformation.analysisTime = analyzeTimeDifference;
+  runAnalyticsInformation.analysisResult = analyzeResult;
 }
 
 async function persistRunAnalytics(runAnalyticsInformations) {
   console.log(
     "Persisting run analytics informations...",
-    JSON.stringify(runAnalyticsInformations)
+    runAnalyticsInformations
   );
 
   const filePath = path.join(
@@ -263,6 +306,7 @@ async function persistRunAnalytics(runAnalyticsInformations) {
 
   fs.writeFileSync(filePath, JSON.stringify(pastRunInformation));
   console.log(
-    `Persisted ${runAnalyticsInformations.length} run analytics informations`
+    `Persisted all ${runAnalyticsInformations.length} run analytics informations`
   );
+  process.exit(0);
 }
